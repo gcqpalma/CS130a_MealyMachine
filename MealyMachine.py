@@ -1,86 +1,88 @@
 from typing import Tuple
 
 
-class CommentDetector:
-    """Mealy machine that recognizes a single C-style block comment (/* ... */)."""
+class BlockCommentMealy:
+    """Mealy machine that recognizes one C-style block comment (/* ... */).
 
-    START = 'q0'
-    SLASH = 'q1'
-    BODY = 'q2'
-    STAR = 'q3'
-    ACCEPT = 'qaccept'
-    TRAP = 'qtrap'
+    Input alphabet: {w, *, /}
+        w = any character that is not '*' or '/'
+    Output alphabet: {0, 1}
+        1 is emitted only when the closing '/' of '*/' is read.
+    """
+
+    START = "q0"
+    OPEN_SLASH = "q1"
+    INSIDE = "q2"
+    INSIDE_STAR = "q3"
+    DONE = "qaccept"
+    DEAD = "qtrap"
+
+    # state -> {symbol: next_state}
+    DELTA = {
+        "q0":      {"w": "qtrap",   "*": "qtrap", "/": "q1"},
+        "q1":      {"w": "qtrap",   "*": "q2",    "/": "qtrap"},
+        "q2":      {"w": "q2",      "*": "q3",    "/": "q2"},
+        "q3":      {"w": "q2",      "*": "q3",    "/": "qaccept"},
+        "qaccept": {"w": "qtrap",   "*": "qtrap", "/": "qtrap"},
+        "qtrap":   {"w": "qtrap",   "*": "qtrap", "/": "qtrap"},
+    }
 
     def __init__(self):
         self.state = self.START
 
-        # (state, symbol) -> next state, built from per-symbol rows
-        self.delta = {}
-        table = {
-            'q0':      ('qtrap',   'qtrap', 'q1'),
-            'q1':      ('qtrap',   'q2',    'qtrap'),
-            'q2':      ('q2',      'q3',    'q2'),
-            'q3':      ('q2',      'q3',    'qaccept'),
-            'qaccept': ('qtrap',   'qtrap', 'qtrap'),
-            'qtrap':   ('qtrap',   'qtrap', 'qtrap'),
-        }
-        for st, (on_a, on_star, on_slash) in table.items():
-            self.delta[(st, 'a')] = on_a
-            self.delta[(st, '*')] = on_star
-            self.delta[(st, '/')] = on_slash
-
     @staticmethod
-    def classify(char: str) -> str:
-        """Anything other than '*' or '/' is treated as the generic symbol 'a'."""
-        return char if char in ('*', '/') else 'a'
+    def to_symbol(ch: str) -> str:
+        """Map a raw character onto the alphabet {w, *, /}."""
+        return ch if ch in ("*", "/") else "w"
 
-    def step(self, char: str) -> Tuple[int, str]:
-        """Processes one character. Returns (output_bit, new_state)."""
-        sym = self.classify(char)
-        out = int(self.state == self.STAR and sym == '/')
-        self.state = self.delta[(self.state, sym)]
-        return out, self.state
+    def feed(self, ch: str) -> Tuple[int, str]:
+        """Consume one character. Returns (output_bit, new_state)."""
+        sym = self.to_symbol(ch)
+        bit = 1 if (self.state == self.INSIDE_STAR and sym == "/") else 0
+        self.state = self.DELTA[self.state][sym]
+        return bit, self.state
 
-    def run(self, text: str):
-        """Runs the machine over the text and prints a step-by-step trace."""
+    def run(self, text: str) -> None:
+        """Feed a whole string through the machine and print a trace."""
         self.state = self.START
         bits = []
 
         print("\n--- Execution Trace ---")
-        print(f"{'Step':<6} | {'Input':<8} | {'Mapped Symbol':<15} | {'Next State':<12} | {'Output'}")
-        print('-' * 55)
+        print(f"{'Step':<6} | {'Input':<8} | {'Symbol':<8} | {'Next State':<12} | {'Output'}")
+        print("-" * 52)
 
-        for n, ch in enumerate(text, 1):
-            mapped = self.classify(ch)
-            out, nxt = self.step(ch)
-            bits.append(str(out))
-            print(f"{n:<6} | {ch!r:<8} | {mapped:<15} | {nxt:<12} | {out}")
+        for i, ch in enumerate(text, start=1):
+            sym = self.to_symbol(ch)
+            bit, nxt = self.feed(ch)
+            bits.append(str(bit))
+            print(f"{i:<6} | {ch!r:<8} | {sym:<8} | {nxt:<12} | {bit}")
 
-        print('-' * 55)
+        print("-" * 52)
         print(f"Final State:     {self.state}")
         print(f"Output Sequence: {''.join(bits)}")
-        print(f"Accepted:        {'YES' if self.state == self.ACCEPT else 'NO'}\n")
+        print(f"Accepted:        {'YES' if self.state == self.DONE else 'NO'}\n")
 
 
-def show_menu():
-    line = '=' * 60
-    print(line)
+def print_banner() -> None:
+    bar = "=" * 60
+    print(bar)
     print("C-Style Comment Mealy Machine Simulator")
-    print(line)
+    print(bar)
+    print("Input alphabet: w (any other character), *, /")
     print("Sample inputs you can test:")
     print("  Valid (Accepted):")
-    for s in ("/*a*/", "/**/", "/***/", "/*aaa*aaa*/", "/*a/a*/", "/*hello world*/"):
+    for s in ("/*w*/", "/**/", "/***/", "/*www*www*/", "/*w/w*/", "/*hello world*/"):
         print(f"    - {s}")
     print("  Invalid (Rejected):")
-    for s in ("/**", "/**/a/*aa*/", "aaa/**/aa", "/*/", "/**a/", "//aaaa"):
+    for s in ("/**", "/**/w/*ww*/", "www/**/ww", "/*/", "/**w/", "//wwww"):
         print(f"    - {s}")
-    print(line)
+    print(bar)
     print("Type 'exit' or press Ctrl+C to quit.\n")
 
 
-def main():
-    machine = CommentDetector()
-    show_menu()
+def main() -> None:
+    machine = BlockCommentMealy()
+    print_banner()
 
     while True:
         try:
@@ -88,7 +90,7 @@ def main():
         except (KeyboardInterrupt, EOFError):
             print("\nExiting...")
             break
-        if text.lower() == 'exit':
+        if text.lower() == "exit":
             break
         machine.run(text)
 
